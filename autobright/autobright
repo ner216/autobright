@@ -1,1 +1,65 @@
 #!/usr/bin/env python3
+
+import cv2
+import numpy as np
+from numpy.linalg import norm
+
+class Camera():
+    def __init__(self, algorithm: str = "gray", camera_id: int = 0, warmup: int = 30):
+        self.algorithm = algorithm
+        self.camera_id = camera_id
+        self.warmup = warmup
+    
+    def estimate(self) -> float:
+        test_img = self._get_img()
+
+        if self.algorithm == "gray":
+            return self._estimate_gray(test_img)
+        elif self.algorithm == "euclidean":
+            return self._estimate_euclidean(test_img)
+
+    def _estimate_gray(self, img) -> float:
+        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return np.mean(gray_img)
+
+    def _estimate_euclidean(self, img) -> float:
+        if len(img.shape) == 3:
+            # create brightness with euclidean norm
+            return np.average(norm(img, axis=2)) / np.sqrt(3)
+        else:
+            print(f"Error, Euclidean estimation requires 3D ndarray but {img.shape}D was given")
+            exit(1)
+    
+    def _get_img(self):
+        # Device index of webcam is usually 0
+        capture = cv2.VideoCapture(self.camera_id)
+
+        if not capture.isOpened():
+            print(f"Error, unable to access camera {camera_id}")
+            exit(1)
+
+        # Disregard initial frames as camera focases
+        for _ in range(self.warmup):
+            ret, frame = capture.read()
+            if not ret:
+                print(f"Error, unable to read warmup frame")
+                exit(1)
+
+        ret, frame = capture.read()
+        if not ret:
+            print(f"Error, unable to read test frame")
+            exit(1)
+        return frame
+
+    
+
+
+
+def main():
+    cam = Camera()
+    print(cam.estimate())
+
+
+if __name__ == "__main__":
+    main()
+
