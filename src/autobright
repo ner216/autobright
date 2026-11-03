@@ -53,12 +53,11 @@ class AdjustSystem():
         self.devices["display"] = [os.path.join(BACKLIGHT_DEVICES, device) for device in os.listdir(BACKLIGHT_DEVICES)]
         self.verbose = verbose
 
-    def set_display(self, level: int):
-        bl_levels = {0: 0.10, 1: 0.25, 2: 0.50, 3: 0.75, 4: 1.0}
+    def set_display(self, level: float):
         for controller_path in self.devices["display"]:
             max_value = int(self._read_value(os.path.join(controller_path, "max_brightness")))
-            new_value = str(int(max_value * bl_levels[level]))
-            if self.verbose: print(f"[Verbose] Controller: {Path(controller_path).name}, max value: {max_value}, new value: {new_value}")
+            new_value = str(int(max_value * level))
+            if self.verbose: print(f"[Verbose] Controller: {Path(controller_path).name}, max value: {max_value}, new value: {new_value} ({int(level*100)}%)")
             self._write_value(os.path.join(controller_path, "brightness"), new_value)
 
     def set_keyboard(self, level: int):
@@ -88,6 +87,16 @@ class AdjustSystem():
         except Exception as e:
             sys.exit(f"Error, Failed to read value at {path}")
 
+def value_to_percent(value: float, minimum: float = 0.10) -> float:
+    brightness_lower_bound = 50
+    brightness_upper_bound = 150
+
+    adjusted_value = min(value - brightness_lower_bound, brightness_upper_bound)
+    percent = adjusted_value / (brightness_upper_bound - brightness_lower_bound)
+
+    if percent < minimum: percent = minimum
+    return percent
+
 def main():
     verbose = False
 
@@ -102,24 +111,12 @@ def main():
     system = AdjustSystem(verbose)
 
     estimate = cam.estimate()
-    if estimate < 80.0:
-        bl_level = 0
-        kb_level = 1
-    elif estimate < 95:
-        bl_level = 1
-        kb_level = 1
-    elif estimate < 110:
-        bl_level = 2
-        kb_level = 0
-    elif estimate < 125:
-        bl_level = 3
-        kb_level = 0
+    level = value_to_percent(estimate)
+    system.set_display(level)
+    if level < 0.5:
+        system.set_keyboard(1)
     else:
-        bl_level = 4
-        kb_level = 0
-
-    system.set_display(bl_level)
-    system.set_keyboard(kb_level)
+        system.set_keyboard(0)
 
 if __name__ == "__main__":
     main()
