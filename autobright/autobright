@@ -3,62 +3,105 @@
 import cv2
 import numpy as np
 from numpy.linalg import norm
+from pathlib import Path
+import os
+import sys
+
+# Constants
+BACKLIGHT_DEVICES = Path("/sys/class/backlight/")
+KEYBOARD_PATH = Path("/sys/class/firmware-attributes/dell-wmi-sysman/attributes/KeyboardIllumination/")
 
 class Camera():
-    def __init__(self, algorithm: str = "gray", camera_id: int = 0, warmup: int = 30):
-        self.algorithm = algorithm
+    def __init__(self, camera_id: int = 0, warmup: int = 30):
         self.camera_id = camera_id
         self.warmup = warmup
     
     def estimate(self) -> float:
         test_img = self._get_img()
 
-        if self.algorithm == "gray":
-            return self._estimate_gray(test_img)
-        elif self.algorithm == "euclidean":
-            return self._estimate_euclidean(test_img)
-
-    def _estimate_gray(self, img) -> float:
-        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray_img = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
         return np.mean(gray_img)
-
-    def _estimate_euclidean(self, img) -> float:
-        if len(img.shape) == 3:
-            # create brightness with euclidean norm
-            return np.average(norm(img, axis=2)) / np.sqrt(3)
-        else:
-            print(f"Error, Euclidean estimation requires 3D ndarray but {img.shape}D was given")
-            exit(1)
     
     def _get_img(self):
         # Device index of webcam is usually 0
         capture = cv2.VideoCapture(self.camera_id)
 
         if not capture.isOpened():
-            print(f"Error, unable to access camera {camera_id}")
-            exit(1)
+            sys.exit(f"Error, unable to access camera {camera_id}")
 
         # Disregard initial frames as camera focases
         for _ in range(self.warmup):
             ret, frame = capture.read()
             if not ret:
-                print(f"Error, unable to read warmup frame")
-                exit(1)
+                sys.exit(f"Error, unable to read warmup frame")
 
         ret, frame = capture.read()
         if not ret:
-            print(f"Error, unable to read test frame")
-            exit(1)
+            sys.exit(f"Error, unable to read test frame")
         return frame
 
-    
+class AdjustSystem():
+    def __init__(self, kb_bl_path: str = KEYBOARD_PATH):
+        self.devices = {}
+        self.kb_bl_path = kb_bl_path
+        self.devices["display"] = [os.path.join(BACKLIGHT_DEVICES, device) for device in os.listdir(BACKLIGHT_DEVICES)]
 
+    def set_display(self, level: int):
+        bl_levels = {0: 0.10, 1: 0.25, 2: 0.50, 3: 0.75, 4: 1.0}
+        for controller_path in self.devices["display"]:
+            max_value = int(self._read_value(os.path.join(controller_path, "max_brightness")))
+            new_value = str(int(max_value * bl_levels[level]))
+            self._write_value(os.path.join(controller_path, "brightness"), new_value)
 
+    def set_keyboard(self, level: int):
+        kb_levels = {0: "Disabled", 1: "Dim", 2: "Bright"}
+        self._write_value(os.path.join(self.kb_bl_path, "current_value"), kb_levels[level])
+
+    def _write_value(self, path: Path, value: str):
+        try:
+            with open(path, "w") as file:
+                v = file.write(value.strip() + "\n")
+                return v
+        except PermissionError:
+            sys.exit(f"Error, Permission denied to write {value} to {path}")
+        except FileNotFoundError:
+            sys.exit(f"Error, File {path} not found")
+        except Exception as e:
+            sys.exit(f"Error, {e}")
+
+    def _read_value(self, path: Path):
+        try:
+            with open(path, "r") as file:
+                v = file.read().strip()
+                return v
+        except FileNotFoundError:
+            sys.exit(f"Error, {path} not found")
+        except Exception as e:
+            sys.exit(f"Error, Failed to read value at {path}")
 
 def main():
     cam = Camera()
-    print(cam.estimate())
+    estimate = cam.estimate()
 
+    system = AdjustSystem()
+    if estimate < 80.0:
+        bl_level = 0
+        kb_level = 1
+    elif estimate < 95:
+        bl_level = 1
+        kb_level = 1
+    elif estimate < 110:
+        bl_level = 2
+        kb_level = 0
+    elif estimate < 125:
+        bl_level = 3
+        kb_level = 0
+    else:
+        bl_level = 4
+        kb_level = 0
+
+    system.set_display(bl_level)
+    system.set_keyboard(kb_level)
 
 if __name__ == "__main__":
     main()
