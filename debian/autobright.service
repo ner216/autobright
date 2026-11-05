@@ -1,0 +1,10 @@
+[Unit]
+Description=Run autobright on boot and wake from sleep
+After=multi-user.target sleep.target suspend.target hibernate.target hybrid-sleep.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/bin/autobright
+
+[Install]
+WantedBy=multi-user.target sleep.target

@@ -88,7 +88,7 @@ class AdjustSystem():
             sys.exit(f"Error, Failed to read value at {path}")
 
 def value_to_percent(value: float, minimum: float = 0.10) -> float:
-    brightness_lower_bound = 50
+    brightness_lower_bound = 60
     brightness_upper_bound = 150
 
     adjusted_value = min(value - brightness_lower_bound, brightness_upper_bound)

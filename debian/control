@@ -1,0 +1,13 @@
+Source: autobright
+Priority: optional
+Section: utils
+Maintainer: Nolan Provencher <email@email.com>
+Build-Depends: debhelper-compat (= 13)
+Homepage: https://github.com/ner216/autobright
+Standards-Version: 4.7.0
+
+Package: autobright
+Architecture: all
+Depends: ${misc:Depends}, python3:any, python3-opencv
+Description: Automate screen/keyboard brightness using 
+    webcam.
