@@ -5,19 +5,10 @@ A python tool to automate screen brightness and keyboard backlight according to 
 ## Architecture
 **Implementation:**
 
-A python script designed to be invoked as a shell command. The script will perform screen/keyboard brightness adjustment once when invoked. The script will be configured to run periodically via a systemd unit.
+A python script designed to be invoked as a shell command. The script will perform screen/keyboard brightness adjustment once when invoked. Ambient brightness is estimated via the installed webcam via OpenCV. The brightness of the display and keybaord are adjusted by writing files in `/sys/class/backlight/` and `/sys/class/firmeare-attributes/`. The script will be configured to run periodically via a systemd unit.
 
 
-**Script:**
+**Why Not Dbus?**
 
-- Use OpenCV library to capture an image with the built-in webcam.
-- Use thresholds to assess environmental brightness level.
-- Use dbus to set new keyboard/display brightness values.
-    - Optional functionality: Write new screen brightness values to `/sys/class/backlight/` and keyboard brightness values to `/sys/class/leds/
-    
-**Functionality:**
-    - Use opencv to pull a reference image frame from webcam
-    - Estimate brightness based on average pixel brightness
-    - Use thresholds to translate brightness to screen/keyboard light levels.
-    - Set new brightness values via dbus or filesystem.
+I initially tried to implement as a Dbus service. This failed as the keyboard backlight is not exposed by DBus. My next plan was to trigger autobrightness and control display backlight with Dbus and control keyboard backlight with filesystem writes. This failed as writing to the filesystem requires root privilige, while also needing to be executed by the user in order to view the user Dbus session.
 
