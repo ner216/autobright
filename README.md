@@ -16,8 +16,6 @@ A python script designed to be invoked as a shell command. The script will perfo
     - Optional functionality: Write new screen brightness values to `/sys/class/backlight/` and keyboard brightness values to `/sys/class/leds/
     
 **Functionality:**
-- A systemd unit that will start a python service for the application on startup after graphical target.
-- Python service will use dbus to perform automatic brightness changes on session login/unlock.
     - Use opencv to pull a reference image frame from webcam
     - Estimate brightness based on average pixel brightness
     - Use thresholds to translate brightness to screen/keyboard light levels.
