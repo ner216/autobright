@@ -7,15 +7,62 @@ from pathlib import Path
 import os
 import sys
 import argparse
+import json
 
 # Constants
-BACKLIGHT_DEVICES = Path("/sys/class/backlight/")
-KEYBOARD_PATH = Path("/sys/class/firmware-attributes/dell-wmi-sysman/attributes/KeyboardIllumination/")
+CONFIG_PATH = Path("/etc/autobright/config.json")
+CONFIG_TEMPLATE = {
+    "brightness_range_offset": 1.0,
+    "warmup_frames": 30,
+    "opencv_camera_id": 0,
+    "min_brightness": 0.1,
+    "display_device_path": "/sys/class/backlight/",
+    "keyboard_device_path": "/sys/class/firmware-attributes/dell-wmi-sysman/attributes/KeyboardIllumination/"
+}
+CONFIG_DESCRIPTIONS = {
+    "brightness_range_offset": "Value betwen 0 and 2 representing the brightness estimation offset",
+    "warmup_frames": "Frames dropped before recording a sample frame for estimate",
+    "opencv_camera_id": "ID of camera to use for estimation(Leave default unless needed)",
+    "min_brightness": "Value between 0 and 1, minimum display brightness",
+    "display_device_path": "Path to video devices",
+    "keyboard_device_path": "Path to keyboard backlight device"
+}
+
+if os.geteuid() != 0:
+    print("[Error] Script must be run with sudo", file=sys.stderr)
+    sys.exit(1)
+
+class Config():
+    @staticmethod
+    def load(path: Path = CONFIG_PATH) -> dict:
+        if not os.path.exists(path):
+            return CONFIG_TEMPLATE
+        else:
+            try:
+                with open(path, 'r') as config_file:
+                    config_data = json.load(config_file)
+                    return config_data
+            except Exception as e:
+                print(f"[Error] Failed to read config {path}\n {e}", file=sys.stderr)
+                return CONFIG_TEMPLATE
+
+    @staticmethod
+    def save(data: dict = CONFIG_TEMPLATE, path: Path = CONFIG_PATH) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(path, 'w') as config_file:
+                json.dump(data, config_file)
+        except Exception as e:
+            print(f"[Error] Unable to save config data to {path}", file=sys.stderr)
+
 
 class Camera():
-    def __init__(self, verbose: bool = False, camera_id: int = 0, warmup: int = 30):
-        self.camera_id = camera_id
-        self.warmup = warmup
+    def __init__(self, config: dict, verbose: bool = False, camera_id: int = 0, warmup: int = 30):
+        self.config = config
+        self.camera_id = self.config["opencv_camera_id"]
+        self.warmup = self.config["warmup_frames"]
+        self.min_brightness = self.config["min_brightness"]
+        self.brightness_offset = self.config["brightness_range_offset"]
         self.verbose = verbose
     
     def estimate(self) -> float:
@@ -23,17 +70,18 @@ class Camera():
 
         gray_img = cv2.cvtColor(test_img, cv2.COLOR_BGR2GRAY)
         mean = np.mean(gray_img)
+        percent = self._value_to_percent(mean)
+        
+        if self.verbose: print(f"[Verbose] mean brightness: {mean}, percent: {percent}")
 
-        if self.verbose: print(f"[Verbose] mean brightness: {mean}")
-
-        return mean
+        return percent
     
     def _get_img(self):
         # Device index of webcam is usually 0
         capture = cv2.VideoCapture(self.camera_id)
 
         if not capture.isOpened():
-            sys.exit(f"Error, unable to access camera {camera_id}")
+            sys.exit(f"Error, unable to access camera {self.camera_id}")
 
         # Disregard initial frames as camera focases
         for _ in range(self.warmup):
@@ -46,12 +94,26 @@ class Camera():
             sys.exit(f"Error, unable to read test frame")
         return frame
 
+    def _value_to_percent(self, value: float) -> float:
+        brightness_lower_bound = 60
+        brightness_upper_bound = 150
+
+        adjusted_value = min(value - brightness_lower_bound, brightness_upper_bound)
+        percent = adjusted_value / (brightness_upper_bound - brightness_lower_bound)
+
+        percent = max(min(percent * self.brightness_offset, 1), self.min_brightness)
+        return percent
+
 class AdjustSystem():
-    def __init__(self, verbose: bool = False, kb_bl_path: str = KEYBOARD_PATH):
-        self.devices = {}
-        self.kb_bl_path = kb_bl_path
-        self.devices["display"] = [os.path.join(BACKLIGHT_DEVICES, device) for device in os.listdir(BACKLIGHT_DEVICES)]
+    def __init__(self, config: dict, verbose: bool = False):
+        self.config = config
+        self.kb_bl_path = config["keyboard_device_path"]
+        self.dp_bl_path = config["display_device_path"]
         self.verbose = verbose
+
+        self.devices = {}
+        self.devices["display"] = [os.path.join(self.dp_bl_path, device) for device in os.listdir(self.dp_bl_path)]
+        
 
     def set_display(self, level: float):
         for controller_path in self.devices["display"]:
@@ -87,36 +149,49 @@ class AdjustSystem():
         except Exception as e:
             sys.exit(f"Error, Failed to read value at {path}")
 
-def value_to_percent(value: float, minimum: float = 0.10) -> float:
-    brightness_lower_bound = 60
-    brightness_upper_bound = 150
-
-    adjusted_value = min(value - brightness_lower_bound, brightness_upper_bound)
-    percent = adjusted_value / (brightness_upper_bound - brightness_lower_bound)
-
-    if percent < minimum: percent = minimum
-    return percent
+def is_number(n: str) -> bool:
+    try:
+        float(n)
+        return True
+    except ValueError:
+        return False
 
 def main():
     verbose = False
+    config = Config.load()
 
     parser = argparse.ArgumentParser(description="Automatically adjust laptop backlights")
+    parser.add_argument("-c", "--configure", nargs=2, metavar=("FIELD", "VALUE"), help="Change a config option (<field> <value>)")
+    parser.add_argument("-l", "--list-config", action="store_true", help="Show current config")
+    parser.add_argument("-r", "--reset-config", action="store_true", help="Reset config to defaults")
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
 
     args = parser.parse_args()
     if args.verbose:
         verbose = True
-
-    cam = Camera(verbose)
-    system = AdjustSystem(verbose)
-
-    estimate = cam.estimate()
-    level = value_to_percent(estimate)
-    system.set_display(level)
-    if level < 0.5:
-        system.set_keyboard(1)
+    if args.list_config:
+        for field in CONFIG_TEMPLATE:
+            print(f"Field: {field}\n  Current: {config[field]}\n  Description: {CONFIG_DESCRIPTIONS[field]}\n")
+        sys.exit(0)
+    elif args.configure:
+        field, value = args.configure
+        if is_number(value): value = float(value)
+        config[field] = value
+        Config.save(config)
+        sys.exit(0)
+    elif args.reset_config:
+        Config.save(CONFIG_TEMPLATE)
+        sys.exit(0)
     else:
-        system.set_keyboard(0)
+        cam = Camera(config, verbose)
+        system = AdjustSystem(config, verbose)
+
+        estimate = cam.estimate()
+        system.set_display(estimate)
+        if estimate < 0.5:
+            system.set_keyboard(1)
+        else:
+            system.set_keyboard(0)
 
 if __name__ == "__main__":
     main()
