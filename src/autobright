@@ -149,12 +149,20 @@ class AdjustSystem():
         except Exception as e:
             sys.exit(f"Error, Failed to read value at {path}")
 
-def is_number(n: str) -> bool:
+# Infers the native type of given string (int or float)
+#   If int -> return as int
+#   If float -> return as float
+#   else -> return value
+def parse_value(value: str) -> float | int | str:
     try:
-        float(n)
-        return True
+        int(value)
+        return int(value)
     except ValueError:
-        return False
+        try:
+            float(value)
+            return float(value)
+        except ValueError:
+            return value
 
 def main():
     verbose = False
@@ -175,8 +183,7 @@ def main():
         sys.exit(0)
     elif args.configure:
         field, value = args.configure
-        if is_number(value): value = float(value)
-        config[field] = value
+        config[field] = parse_value(value)
         Config.save(config)
         sys.exit(0)
     elif args.reset_config:
